@@ -1,5 +1,5 @@
 # JitPack builds the public repository (github.com/vrsoai/verso-connect-android)
-# and serves com.github.vrsoai.verso-connect-android:versoconnect:<tag>.
+# and serves com.github.vrsoai:verso-connect-android:<tag>.
 jdk:
   - openjdk17
 before_install:
