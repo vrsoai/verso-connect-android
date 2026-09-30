@@ -23,7 +23,8 @@ if ! grep -q "version = \"$version\"" sdks/android/versoconnect/build.gradle.kts
   echo "the maven publication version is not $version" >&2
   exit 1
 fi
-split=$(git subtree split --prefix=sdks/android)
+# Only the hash: subtree may print progress on the same stream.
+split=$(git subtree split --prefix=sdks/android 2>/dev/null | tr -cd '0-9a-f' | tail -c 40)
 git push "$repo" "$split:refs/heads/main"
 git push "$repo" "$split:refs/tags/$version"
 echo "published $version as $split"
