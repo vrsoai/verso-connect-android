@@ -9,6 +9,29 @@ Requirements: Android 7.0+ (API 24), Kotlin, AndroidX.
 
 Documentation: [docs.tryverso.ai/guides/mobile-apps](https://docs.tryverso.ai/guides/mobile-apps).
 
+## Install
+
+The library is served by JitPack. Add the repository once, in
+`settings.gradle.kts`:
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
+    }
+}
+```
+
+Then the dependency, in your app module:
+
+```kotlin
+dependencies {
+    implementation("com.github.vrsoai.verso-connect-android:versoconnect:0.1.0")
+}
+```
+
 ## Workspace
 
 - `versoconnect/`: the library, package `ai.tryverso.connect`.
