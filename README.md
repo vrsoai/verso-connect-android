@@ -35,8 +35,12 @@ dependencies {
 ## Workspace
 
 - `versoconnect/`: the library, package `ai.tryverso.connect`.
-- `demo/`: a one-screen app to try it. Build with `./gradlew :demo:installDebug`
-  and prefill the link with
+- `demo/`: a one-screen app that stands in for a partner app. Build with
+  `./gradlew :demo:installDebug`, tap **Connect ChatGPT**: the app asks the
+  example partner backend (`../examples/partner-backend`) for a link, then opens
+  the flow. Put the backend's address and demo key in `local.properties`
+  (`DEMO_BACKEND_URL=…`, `DEMO_KEY=…`) or in the environment; they reach the
+  app through `BuildConfig`. Debug bypass, skipping the backend:
   `adb shell am start -n ai.tryverso.connect.demo/.MainActivity --es link '<url>'`.
 
 ## Use

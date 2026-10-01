@@ -2,70 +2,141 @@ package ai.tryverso.connect.demo
 
 import android.net.Uri
 import android.os.Bundle
-import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import ai.tryverso.connect.VersoConnect
 import ai.tryverso.connect.VersoConnectException
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.UUID
+import org.json.JSONObject
+import kotlin.concurrent.thread
 
 /**
- * Paste a connect link, tap Connect. A `link` string extra prefills the field:
+ * Where this demo's backend lives, and the key that stands in for a user
+ * session. Both come from local.properties (or the environment) through
+ * BuildConfig, so they stay out of git. A real app sends its own session
+ * token instead of a shared key.
+ */
+object DemoConfig {
+    val BACKEND_URL: String = BuildConfig.DEMO_BACKEND_URL
+    val DEMO_KEY: String = BuildConfig.DEMO_KEY
+}
+
+/**
+ * A stand-in for a partner app: one screen, one button. Tapping it asks the
+ * partner backend for a connect link, then hands that link to VersoConnect.
+ *
+ * Debug only: a `link` string extra skips the backend:
  * `adb shell am start -n ai.tryverso.connect.demo/.MainActivity --es link '<url>'`.
  */
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var status: TextView
+    private lateinit var button: Button
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val prefs = getSharedPreferences("demo", MODE_PRIVATE)
+        // One stable id per install: what a real app would derive from its own user.
+        val userRef = prefs.getString("userRef", null) ?: ("demo-" + UUID.randomUUID().toString().take(8)).also {
+            prefs.edit().putString("userRef", it).apply()
+        }
         val density = resources.displayMetrics.density
         val pad = (24 * density).toInt()
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
             setPadding(pad, pad * 2, pad, pad)
         }
-        root.addView(TextView(this).apply {
-            text = "Verso Connect demo"
-            textSize = 22f
+        fun row(view: android.view.View, top: Int = pad / 2) = root.addView(
+            view,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = top },
+        )
+        row(TextView(this).apply { text = "Partner app"; textSize = 28f; gravity = Gravity.CENTER }, 0)
+        row(TextView(this).apply {
+            text = "Connect your ChatGPT account to bring your conversations into this app."
             gravity = Gravity.CENTER
         })
-        val link = EditText(this).apply {
-            hint = "https://connect.tryverso.ai/start?token=…"
-            inputType = InputType.TYPE_TEXT_VARIATION_URI
-            setSingleLine()
-            setText(intent.getStringExtra("link") ?: "")
-        }
-        root.addView(link, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = pad })
-        val status = TextView(this).apply {
-            text = "Paste a connect link, then tap Connect."
-            gravity = Gravity.CENTER
-        }
-        val button = Button(this).apply { text = "Connect ChatGPT" }
-        root.addView(button, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = pad / 2 })
-        root.addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = pad / 2 })
+        button = Button(this).apply { text = "Connect ChatGPT" }
+        row(button, pad)
+        status = TextView(this).apply { gravity = Gravity.CENTER }
+        row(status)
+        row(TextView(this).apply { text = "user $userRef"; textSize = 11f; gravity = Gravity.CENTER; alpha = 0.5f }, pad)
         setContentView(root)
 
+        prefs.getString("connectionId", null)?.let { showConnected(it) }
+
         button.setOnClickListener {
-            val uri = Uri.parse(link.text.toString().trim())
             button.isEnabled = false
-            status.text = "Opening ChatGPT…"
-            VersoConnect.present(this, uri) { result ->
-                button.isEnabled = true
-                status.text = result.fold(
-                    onSuccess = { "Connected. connectionId: ${it.connectionId}" },
-                    onFailure = { e ->
-                        when (e) {
-                            is VersoConnectException.Cancelled -> "Cancelled."
-                            is VersoConnectException.Rejected -> "Rejected (${e.status}): ${e.message}"
-                            else -> "Failed: ${e.message}"
-                        }
-                    },
-                )
+            val debugLink = intent.getStringExtra("link")
+            if (debugLink != null) {
+                present(Uri.parse(debugLink), prefs)
+            } else {
+                status.text = "Asking the backend for a connect link…"
+                thread {
+                    val result = runCatching { PartnerBackend.connectLink(userRef) }
+                    runOnUiThread {
+                        result.fold(
+                            onSuccess = { present(it, prefs) },
+                            onFailure = { e -> button.isEnabled = true; status.text = "Failed: ${e.message}" },
+                        )
+                    }
+                }
             }
+        }
+    }
+
+    private fun present(link: Uri, prefs: android.content.SharedPreferences) {
+        status.text = "Opening ChatGPT…"
+        VersoConnect.present(this, link) { result ->
+            button.isEnabled = true
+            result.fold(
+                onSuccess = {
+                    prefs.edit().putString("connectionId", it.connectionId).apply()
+                    showConnected(it.connectionId)
+                },
+                onFailure = { e ->
+                    status.text = when (e) {
+                        is VersoConnectException.Cancelled -> "Cancelled."
+                        is VersoConnectException.Rejected -> "Rejected (${e.status}): ${e.message}"
+                        else -> "Failed: ${e.message}"
+                    }
+                },
+            )
+        }
+    }
+
+    private fun showConnected(connectionId: String) {
+        status.text = "ChatGPT connected\nconnection $connectionId"
+        button.text = "Reconnect"
+    }
+}
+
+/** The one call a partner app makes to its own backend before showing the flow. */
+object PartnerBackend {
+    fun connectLink(userRef: String): Uri {
+        val connection = (URL(DemoConfig.BACKEND_URL + "/connect-link").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = 15_000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer " + DemoConfig.DEMO_KEY)
+        }
+        try {
+            connection.outputStream.use { it.write(JSONObject().put("userRef", userRef).toString().toByteArray()) }
+            if (connection.responseCode != 200) throw IOException("backend answered ${connection.responseCode}")
+            val body = connection.inputStream.bufferedReader().readText()
+            return Uri.parse(JSONObject(body).getString("url"))
+        } finally {
+            connection.disconnect()
         }
     }
 }
