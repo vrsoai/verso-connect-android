@@ -16,11 +16,17 @@ import androidx.activity.result.contract.ActivityResultContract
  * the screen closes itself in every case.
  */
 object VersoConnect {
-    const val version = "0.1.0"
+    const val version = "0.1.1"
 
-    /** Where the SDK talks to. Only change it for a test environment. */
+    private const val DEFAULT_BASE_URL = "https://connect.tryverso.ai"
+
+    /**
+     * Where the SDK talks to. By default the host of the connect link itself,
+     * so a link minted for a staging environment goes to staging without any
+     * configuration. Set it to force another host.
+     */
     @JvmStatic
-    var baseUrl: String = "https://connect.tryverso.ai"
+    var baseUrl: String = DEFAULT_BASE_URL
 
     internal var pendingCallback: ((Result<VersoConnection>) -> Unit)? = null
 
@@ -38,7 +44,18 @@ object VersoConnect {
             return
         }
         pendingCallback = callback
-        activity.startActivity(VersoConnectActivity.intent(activity, token))
+        activity.startActivity(VersoConnectActivity.intent(activity, token, baseFor(link)))
+    }
+
+    /** The API host for a link: the link's own origin unless [baseUrl] was overridden. */
+    internal fun baseFor(link: Uri): String =
+        if (baseUrl == DEFAULT_BASE_URL) originOf(link) ?: baseUrl else baseUrl
+
+    /** `scheme://host[:port]` of a link, where its API lives. */
+    internal fun originOf(link: Uri): String? {
+        val scheme = link.scheme ?: return null
+        val host = link.host ?: return null
+        return if (link.port > 0) "$scheme://$host:${link.port}" else "$scheme://$host"
     }
 
     /** The `token` query parameter, or a bare token as the last path segment. */
@@ -82,7 +99,7 @@ sealed class VersoConnectException(message: String) : Exception(message) {
  */
 class VersoConnectContract : ActivityResultContract<Uri, Result<VersoConnection>>() {
     override fun createIntent(context: Context, input: Uri): Intent =
-        VersoConnectActivity.intent(context, VersoConnect.tokenFrom(input) ?: "")
+        VersoConnectActivity.intent(context, VersoConnect.tokenFrom(input) ?: "", VersoConnect.baseFor(input))
 
     override fun parseResult(resultCode: Int, intent: Intent?): Result<VersoConnection> =
         VersoConnectActivity.parseResult(resultCode, intent)

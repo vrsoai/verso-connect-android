@@ -28,7 +28,7 @@ Then the dependency, in your app module:
 
 ```kotlin
 dependencies {
-    implementation("com.github.vrsoai:verso-connect-android:0.1.0")
+    implementation("com.github.vrsoai:verso-connect-android:0.1.1")
 }
 ```
 

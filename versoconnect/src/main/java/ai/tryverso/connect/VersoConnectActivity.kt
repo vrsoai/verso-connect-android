@@ -41,6 +41,7 @@ internal class VersoConnectActivity : AppCompatActivity() {
 
     companion object {
         private const val EXTRA_TOKEN = "ai.tryverso.connect.TOKEN"
+        private const val EXTRA_BASE_URL = "ai.tryverso.connect.BASE_URL"
         const val EXTRA_CONNECTION_ID = "ai.tryverso.connect.CONNECTION_ID"
         const val EXTRA_STATUS = "ai.tryverso.connect.STATUS"
         const val EXTRA_ERROR = "ai.tryverso.connect.ERROR"
@@ -56,8 +57,10 @@ internal class VersoConnectActivity : AppCompatActivity() {
         private const val CAPTURE_RETRY_MS = 3_000L
         private const val MAX_WAITING_ANSWERS = 40
 
-        fun intent(context: Context, token: String): Intent =
-            Intent(context, VersoConnectActivity::class.java).putExtra(EXTRA_TOKEN, token)
+        fun intent(context: Context, token: String, baseUrl: String): Intent =
+            Intent(context, VersoConnectActivity::class.java)
+                .putExtra(EXTRA_TOKEN, token)
+                .putExtra(EXTRA_BASE_URL, baseUrl)
 
         fun parseResult(resultCode: Int, intent: Intent?): Result<VersoConnection> = when (resultCode) {
             RESULT_OK -> Result.success(VersoConnection(intent?.getStringExtra(EXTRA_CONNECTION_ID) ?: ""))
@@ -78,7 +81,7 @@ internal class VersoConnectActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var progress: ProgressBar
-    private val api by lazy { VersoApi(VersoConnect.baseUrl) }
+    private val api by lazy { VersoApi(intent.getStringExtra(EXTRA_BASE_URL) ?: VersoConnect.baseUrl) }
     private val handler = Handler(Looper.getMainLooper())
     private var start: VersoApi.Start? = null
     private var checking = false
