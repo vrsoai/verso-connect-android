@@ -16,7 +16,7 @@ import androidx.activity.result.contract.ActivityResultContract
  * the screen closes itself in every case.
  */
 object VersoConnect {
-    const val version = "0.1.1"
+    const val version = "0.1.2"
 
     private const val DEFAULT_BASE_URL = "https://connect.tryverso.ai"
 

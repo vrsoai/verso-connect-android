@@ -28,7 +28,7 @@ Then the dependency, in your app module:
 
 ```kotlin
 dependencies {
-    implementation("com.github.vrsoai:verso-connect-android:0.1.1")
+    implementation("com.github.vrsoai:verso-connect-android:0.1.2")
 }
 ```
 
@@ -91,8 +91,10 @@ itself must complete within one hour.
 
 1. The SDK sends the link's token to Verso, which verifies and consumes it
    and answers with the provider's login URL and what to watch for.
-2. The login opens in a `WebView` presenting itself as Chrome, with cookies
-   and storage cleared before and after. Nothing is left on the device.
+2. The login opens in a `WebView` presenting itself as Chrome. The provider's
+   cookies and storage are cleared before and after, and only those: Android
+   shares one cookie jar between all of an app's WebViews, so your own
+   session is left alone. Nothing of the ChatGPT session is left on the device.
 3. When the provider's session cookie is present and the session is usable,
    the SDK sends it to Verso, once, over TLS. Verso encrypts it with a key that
    exists only for this connection, creates the connection, sends

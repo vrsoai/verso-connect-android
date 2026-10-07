@@ -2,8 +2,10 @@ package ai.tryverso.connect.demo
 
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.view.Gravity
 import android.view.ViewGroup
+import android.webkit.CookieManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -95,8 +97,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun present(link: Uri, prefs: android.content.SharedPreferences) {
         status.text = "Opening ChatGPT…"
+        // A cookie standing in for this app's own WebView session: the flow must leave it alone.
+        CookieManager.getInstance().setCookie("https://partner.example", "session=kept; Path=/")
         VersoConnect.present(this, link) { result ->
             button.isEnabled = true
+            fun report(moment: String) {
+                val cookies = CookieManager.getInstance()
+                Log.i(
+                    "VersoDemo",
+                    "$moment: app cookie kept=" + (cookies.getCookie("https://partner.example")?.contains("session=kept") == true) +
+                        ", provider cookies left=" + (cookies.getCookie("https://chatgpt.com") != null),
+                )
+            }
+            report("at result")
+            status.postDelayed({ report("2s later") }, 2_000)
             result.fold(
                 onSuccess = {
                     prefs.edit().putString("connectionId", it.connectionId).apply()

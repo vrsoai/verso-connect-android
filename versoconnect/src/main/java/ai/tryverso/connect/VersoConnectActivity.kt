@@ -5,11 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -17,6 +19,7 @@ import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -26,10 +29,13 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The connect screen: the provider's login in a WebView that presents itself
@@ -88,6 +94,9 @@ internal class VersoConnectActivity : AppCompatActivity() {
     private var waitingAnswers = 0
     private var finished = false
 
+    /** Every host the login navigated to, so the clean-up reaches the provider's subdomains. */
+    private val visitedHosts: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
     private val poll = object : Runnable {
         override fun run() {
             checkForSession()
@@ -110,6 +119,7 @@ internal class VersoConnectActivity : AppCompatActivity() {
             try {
                 val started = api.start(token, deviceInfo())
                 start = started
+                clearProviderState()
                 webView.loadUrl(started.loginUrl)
                 handler.postDelayed(poll, POLL_MS)
             } catch (e: VersoConnectException.Rejected) {
@@ -127,6 +137,14 @@ internal class VersoConnectActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.WHITE)
+        }
+        // Edge-to-edge (the default from Android 15 for apps targeting it)
+        // would draw the header under the status bar and the page under the
+        // navigation bar.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            WindowInsetsCompat.CONSUMED
         }
         val header = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (52 * density).toInt())
@@ -167,11 +185,8 @@ internal class VersoConnectActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     private fun configureWebView() {
         val cookies = CookieManager.getInstance()
-        cookies.removeAllCookies(null)
         cookies.setAcceptCookie(true)
         cookies.setAcceptThirdPartyCookies(webView, true)
-        WebStorage.getInstance().deleteAllData()
-        webView.clearCache(true)
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -182,6 +197,11 @@ internal class VersoConnectActivity : AppCompatActivity() {
         }
         webView.addJavascriptInterface(Bridge(), "VersoBridge")
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                if (request.isForMainFrame) request.url.host?.let { visitedHosts.add(it) }
+                return null
+            }
+
             override fun onPageFinished(view: WebView, url: String?) {
                 progress.visibility = View.INVISIBLE
                 checkForSession()
@@ -306,6 +326,10 @@ internal class VersoConnectActivity : AppCompatActivity() {
         if (finished) return
         finished = true
         handler.removeCallbacksAndMessages(null)
+        if (::webView.isInitialized) webView.stopLoading()
+        // The provider's state is gone by the time the app gets the result;
+        // onDestroy clears again for anything a late response set.
+        clearProviderState()
         setResult(code, data)
         VersoConnect.pendingCallback?.let { callback ->
             VersoConnect.pendingCallback = null
@@ -320,9 +344,22 @@ internal class VersoConnectActivity : AppCompatActivity() {
             webView.stopLoading()
             webView.destroy()
         }
-        // Nothing of the provider session stays on the device.
-        CookieManager.getInstance().removeAllCookies(null)
-        WebStorage.getInstance().deleteAllData()
+        clearProviderState()
         super.onDestroy()
+    }
+
+    /**
+     * Expires the provider's cookies and deletes its web storage: before the
+     * login, so no stale session decides the account; after it, so nothing of
+     * the session stays on the device. The cookie jar is the host app's own,
+     * shared with its WebViews, so only the provider's domains are touched
+     * (see [ProviderState]).
+     */
+    private fun clearProviderState() {
+        val started = start ?: return
+        val domains = listOfNotNull(started.cookieDomain, Uri.parse(started.loginUrl).host, Uri.parse(started.sessionUrl).host)
+        val hosts = ProviderState.hostsToClear(domains, visitedHosts)
+        val leftover = ProviderState.clear(CookieManager.getInstance(), WebStorage.getInstance(), hosts)
+        if (leftover.isNotEmpty()) Log.w("VersoConnect", "provider cookies still present on ${leftover.joinToString()}")
     }
 }
